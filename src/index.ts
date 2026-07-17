@@ -140,16 +140,16 @@ async function update(clientOptions: ClientOptions, newRecords: AddressableRecor
 				proxied, // Pass the existing "proxied" status
 				comment, // Pass the existing "comment"
 			});
+			console.log('DNS record for ' + newRecord.name + '(' + newRecord.type + ') updated successfully to ' + newRecord.content);
 		}
 		
-		console.log('DNS record for ' + newRecord.name + '(' + newRecord.type + ') updated successfully to ' + newRecord.content);
 	}
 
 	return new Response(success_body, { status: 200 });
 }
 
 async function handleUpdate(request: Request): Promise<Response> {
-	console.log('Body: ' + (await request.text()));
+//	console.log('Body: ' + (await request.text()));
 
 	try {
 		// Construct client options and DNS records
