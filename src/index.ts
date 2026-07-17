@@ -12,6 +12,7 @@ class HttpError extends Error {
 	}
 }
 
+
 function constructClientOptions(request: Request): ClientOptions {
 	const authorization = request.headers.get('Authorization');
 	if (!authorization) {
@@ -36,9 +37,16 @@ function constructDNSRecords(request: Request): AddressableRecord[] {
 	const url = new URL(request.url);
 	const params = url.searchParams;
 	let ip = (params.get('ip') || params.get('myip'))?.trim() || null;
+	const poll = params.get("poll")?.trim() || null;
+	let success_body = "POLL";
 	const ip6 = params.get('ip6')?.trim() || null;
 	const hostname = params.get('hostname')?.trim() || null;
 
+	// For NAT support trick UCG into retrying every 2 minutes.
+	if (poll === null || poll === undefined) {
+		success_body = "OK";
+	}
+	
 	if (ip === null || ip === undefined) {
 		throw new HttpError(422, 'The "ip" parameter is required and cannot be empty. Specify ip=auto to use the client IP.');
 	} else if (ip == 'auto') {
@@ -80,10 +88,10 @@ function constructDNSRecords(request: Request): AddressableRecord[] {
 		}
 	}
 
-	return records;
+	return [ records, success_body ];
 }
 
-async function update(clientOptions: ClientOptions, newRecords: AddressableRecord[]): Promise<Response> {
+async function update(clientOptions: ClientOptions, newRecords: AddressableRecord[], success_body): Promise<Response> {
 	const cloudflare = new Cloudflare(clientOptions);
 
 	const tokenStatus = (await cloudflare.user.tokens.verify()).status;
@@ -120,43 +128,87 @@ async function update(clientOptions: ClientOptions, newRecords: AddressableRecor
 		const proxied = currentRecord.proxied ?? false; // Default to `false` if `proxied` is undefined
 		const comment = currentRecord.comment;
 
-		await cloudflare.dns.records.update(records[0].id, {
-			content: newRecord.content,
-			zone_id: zone.id,
-			name: newRecord.name as any,
-			type: newRecord.type,
-			ttl: newRecord.ttl,
-			proxied, // Pass the existing "proxied" status
-			comment, // Pass the existing "comment"
-		});
-
+		if (newRecord.content === currentRecord.content) {
+			console.log('DNS record for ' + newRecord.name + '(' + newRecord.type + ') no update required ');
+		} else {
+			await cloudflare.dns.records.update(records[0].id, {
+				content: newRecord.content,
+				zone_id: zone.id,
+				name: newRecord.name as any,
+				type: newRecord.type,
+				ttl: newRecord.ttl,
+				proxied, // Pass the existing "proxied" status
+				comment, // Pass the existing "comment"
+			});
+		}
+		
 		console.log('DNS record for ' + newRecord.name + '(' + newRecord.type + ') updated successfully to ' + newRecord.content);
 	}
 
-	return new Response('OK', { status: 200 });
+	return new Response(success_body, { status: 200 });
 }
+
+async function handleUpdate(request: Request): Promise<Response> {
+	console.log('Body: ' + (await request.text()));
+
+	try {
+		// Construct client options and DNS records
+		const clientOptions = constructClientOptions(request);
+		const [records, success_body] = constructDNSRecords(request);
+
+		// Run the update function
+		return await update(clientOptions, records, success_body);
+	} catch (error) {
+		if (error instanceof HttpError) {
+			console.log('Error updating DNS record: ' + error.message);
+			return new Response(error.message, { status: error.statusCode });
+		} else {
+			console.log('Error updating DNS record: ' + error);
+			return new Response('Internal Server Error', { status: 500 });
+		}
+	}
+}
+
+async function handleIPQuery(request: Request): Promise<Response> {
+
+	const clientIp = request.headers.get("CF-Connecting-IP");
+
+	if (!clientIp) {
+		return new Response("IP address not found", { status: 400 });
+	}
+
+	return new Response(clientIp, {
+		headers: { 
+			"Content-Type": "text/plain",
+			"Cache-Control": "no-store" 
+		},
+	});
+}
+
+const apiPathTable = new Map([
+    ["/update", handleUpdate],        // app default
+    ["/nic/update", handleUpdate],    // dyndns path
+    ["/ip", handleIPQuery],           // various dyndns check paths
+    ["/myip", handleIPQuery],
+    ["/", handleIPQuery]
+]);
+
 
 export default {
 	async fetch(request): Promise<Response> {
 		console.log('Requester IP: ' + request.headers.get('CF-Connecting-IP'));
-		console.log(request.method + ': ' + request.url);
-		console.log('Body: ' + (await request.text()));
+		// console.log(request.method + ': ' + request.url);
+	    
+		const url = new URL(request.url);
+		const pathname = url.pathname;
+		const handler = apiPathTable.get(pathname);
 
-		try {
-			// Construct client options and DNS records
-			const clientOptions = constructClientOptions(request);
-			const records = constructDNSRecords(request);
-
-			// Run the update function
-			return await update(clientOptions, records);
-		} catch (error) {
-			if (error instanceof HttpError) {
-				console.log('Error updating DNS record: ' + error.message);
-				return new Response(error.message, { status: error.statusCode });
-			} else {
-				console.log('Error updating DNS record: ' + error);
-				return new Response('Internal Server Error', { status: 500 });
-			}
+		if (handler) {
+			return handler(request);
 		}
-	},
+
+		// No point in being too correct about error.
+		// Only folks who get here are trying to enumerate api anyhow.
+		return new Response("Endpoint Forbidden", { status: 403 });
+    },
 } satisfies ExportedHandler<Env>;
