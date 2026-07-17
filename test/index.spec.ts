@@ -111,12 +111,13 @@ describe('UniFi DDNS Worker', () => {
 			},
 		}));
 		expect(response.status).toBe(200);
+		expect(await response.text()).toBe('OK');
 	});
 
 	it('responds with 200 on valid update when IP is set to auto', async () => {
 		mockVerify.mockResolvedValueOnce({ status: 'active' });
 		mockListZones.mockResolvedValueOnce({ result: [{ id: 'zone-id' }] });
-		mockListRecords.mockResolvedValueOnce({ result: [{ id: 'record-id', name: 'home.example.com', type: 'A' }] });
+		mockListRecords.mockResolvedValueOnce({ result: [{ id: 'record-id', name: 'home.example.com', type: 'A', content: '127.0.0.1' }] });
 		mockUpdateRecord.mockResolvedValueOnce({});
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&hostname=home.example.com', {
@@ -126,6 +127,41 @@ describe('UniFi DDNS Worker', () => {
 			},
 		}));
 		expect(response.status).toBe(200);
+		expect(mockUpdateRecord).toHaveBeenCalledTimes(1);
+		expect(await response.text()).toBe('OK');
+	});
+
+	it('responds with 200/POLL on valid update when poll parameter exists', async () => {
+		mockVerify.mockResolvedValueOnce({ status: 'active' });
+		mockListZones.mockResolvedValueOnce({ result: [{ id: 'zone-id' }] });
+		mockListRecords.mockResolvedValueOnce({ result: [{ id: 'record-id', name: 'home.example.com', type: 'A', content: '127.0.0.1' }] });
+		mockUpdateRecord.mockResolvedValueOnce({});
+
+		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&poll=true&hostname=home.example.com', {
+			headers: {
+				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				'CF-Connecting-IP': '192.0.2.1',
+			},
+		}));
+		expect(response.status).toBe(200);
+		expect(mockUpdateRecord).toHaveBeenCalledTimes(1);
+		expect(await response.text()).toBe('POLL');
+	});
+
+	it('Update is skipped if no change required', async () => {
+		mockVerify.mockResolvedValueOnce({ status: 'active' });
+		mockListZones.mockResolvedValueOnce({ result: [{ id: 'zone-id' }] });
+		mockListRecords.mockResolvedValueOnce({ result: [{ id: 'record-id', name: 'home.example.com', type: 'A', content: '192.0.2.1' }] });
+		mockUpdateRecord.mockResolvedValueOnce({});
+
+		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&hostname=home.example.com', {
+			headers: {
+				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				'CF-Connecting-IP': '192.0.2.1',
+			},
+		}));
+		expect(response.status).toBe(200);
+		expect(mockUpdateRecord).toHaveBeenCalledTimes(0);
 	});
 
 	it('responds with 200 on valid multi-hostname update', async () => {
