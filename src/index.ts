@@ -93,8 +93,18 @@ function constructDNSRecords(request: Request): AddressableRecord[] {
 
 async function update(clientOptions: ClientOptions, newRecords: AddressableRecord[], success_body): Promise<Response> {
 	const cloudflare = new Cloudflare(clientOptions);
+    let tokenStatus:Str = "malformed";
 
-	const tokenStatus = (await cloudflare.user.tokens.verify()).status;
+	if (clientOptions.apiToken.startsWith("cfut_")) {
+		tokenStatus = (await cloudflare.user.tokens.verify()).status;
+	} else if (clientOptions.apiToken.startsWith("cfat_")) {
+		tokenStatus = (await cloudflare.accounts.tokens.verify( {
+			account_id: clientOptions.apiEmail
+		})).status;
+	}
+
+	console.log('Client token status is: ' + tokenStatus + '.');
+			   
 	if (tokenStatus !== 'active') {
 		throw new HttpError(401, 'This API Token is ' + tokenStatus);
 	}

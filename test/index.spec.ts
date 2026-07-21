@@ -16,6 +16,11 @@ vi.mock('cloudflare', () => {
 						verify: mockVerify,
 					},
 				},
+				accounts: {
+					tokens: {
+						verify: mockVerify,
+					}
+				},
 				zones: {
 					list: mockListZones,
 				},
@@ -53,12 +58,23 @@ describe('UniFi DDNS Worker', () => {
 		expect(await response.text()).toBe('Invalid API key or token.');
 	});
 
+	it('responds with 401 when token is malformed', async () => {
+		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
+			headers: {
+				Authorization: 'Basic ' + btoa('email@example.com:xx_validtoken'),
+			},
+		}));
+
+		expect(response.status).toBe(401);
+		expect(await response.text()).toBe('This API Token is malformed');
+	});
+
 	it('responds with 401 when token is not active', async () => {
 		mockVerify.mockResolvedValueOnce({ status: 'inactive' });
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -70,7 +86,7 @@ describe('UniFi DDNS Worker', () => {
 		mockVerify.mockResolvedValueOnce({ status: 'active' });
 		const response = await worker.fetch(new Request('http://example.com/update?hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 		expect(response.status).toBe(422);
@@ -81,7 +97,7 @@ describe('UniFi DDNS Worker', () => {
 		mockVerify.mockResolvedValueOnce({ status: 'active' });
 		const response = await worker.fetch(new Request('http://example.com/update?hostname=home.example.com&ip=auto', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 		expect(response.status).toBe(500);
@@ -92,7 +108,7 @@ describe('UniFi DDNS Worker', () => {
 		mockVerify.mockResolvedValueOnce({ status: 'active' });
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 		expect(response.status).toBe(422);
@@ -107,7 +123,22 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
+			},
+		}));
+		expect(response.status).toBe(200);
+		expect(await response.text()).toBe('OK');
+	});
+
+	it('responds with 200 on valid update, account token', async () => {
+		mockVerify.mockResolvedValueOnce({ status: 'active' });
+		mockListZones.mockResolvedValueOnce({ result: [{ id: 'zone-id' }] });
+		mockListRecords.mockResolvedValueOnce({ result: [{ id: 'record-id', name: 'home.example.com', type: 'A' }] });
+		mockUpdateRecord.mockResolvedValueOnce({});
+
+		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
+			headers: {
+				Authorization: 'Basic ' + btoa('email@example.com:cfat_validtoken'),
 			},
 		}));
 		expect(response.status).toBe(200);
@@ -122,7 +153,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				'CF-Connecting-IP': '192.0.2.1',
 			},
 		}));
@@ -139,7 +170,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&poll=true&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				'CF-Connecting-IP': '192.0.2.1',
 			},
 		}));
@@ -156,7 +187,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=auto&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				'CF-Connecting-IP': '192.0.2.1',
 			},
 		}));
@@ -175,7 +206,7 @@ describe('UniFi DDNS Worker', () => {
 		const response = await worker.fetch(
 			new Request('http://example.com/update?ip=192.0.2.1&hostname=example.com,*.example.com', {
 				headers: {
-					Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+					Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				},
 			}),
 		);
@@ -196,7 +227,7 @@ describe('UniFi DDNS Worker', () => {
 		const response = await worker.fetch(
 			new Request('http://example.com/update?ip=192.0.2.1&ip6=2001:0db8:85a3:0000:0000:8a2e:0370:7334&hostname=example.com,sub.example.com', {
 				headers: {
-					Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+					Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				},
 			}),
 		);
@@ -210,7 +241,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -224,7 +255,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -244,7 +275,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -259,7 +290,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -274,7 +305,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=192.0.2.1&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 
@@ -290,7 +321,7 @@ describe('UniFi DDNS Worker', () => {
 
 		const response = await worker.fetch(new Request('http://example.com/update?ip=2001:0db8:85a3:0000:0000:8a2e:0370:7334&hostname=home.example.com', {
 			headers: {
-				Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+				Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 			},
 		}));
 		expect(response.status).toBe(200);
@@ -307,7 +338,7 @@ describe('UniFi DDNS Worker', () => {
 		const response = await worker.fetch(
 			new Request('http://example.com/update?ip=192.0.2.1&ip6=2001:0db8:85a3:0000:0000:8a2e:0370:7334&hostname=home.example.com', {
 				headers: {
-					Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+					Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				},
 			}),
 		);
@@ -319,7 +350,7 @@ describe('UniFi DDNS Worker', () => {
 		const response = await worker.fetch(
 			new Request('http://example.com/update?ip=192.0.2.1&ip6=not-an-ipv6&hostname=home.example.com', {
 				headers: {
-					Authorization: 'Basic ' + btoa('email@example.com:validtoken'),
+					Authorization: 'Basic ' + btoa('email@example.com:cfut_validtoken'),
 				},
 			}),
 		);
